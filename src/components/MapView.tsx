@@ -18,6 +18,13 @@ const DIRECTION_COLORS: Record<number, string> = {
 };
 const UNKNOWN_COLOR = '#6b7280';
 const ROUTE_LINE_OPACITY = 0.6;
+const ROUTE_LINE_HIGHLIGHT_OPACITY = 0.95;
+
+// Kuinka lähelle (pikseleinä) hiiren pitää osua reittiviivasta, jotta se
+// lasketaan hoveratuksi. Sama karttatason liikkeenkuuntelija tarkistaa KAIKKI
+// piirretyt reittiviivat, ei vain ylimpänä olevaa - näin päällekkäin kulkevat
+// linjat (esim. sama katu, monta runkolinjaa) näkyvät kaikki yhdessä tooltipissä.
+const HOVER_TOLERANCE_PX = 6;
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
@@ -83,12 +90,88 @@ function tooltipHtml(vehicle: VehiclePosition, shortName: string, directions: Di
   `;
 }
 
+// Yksi kartalle piirretty reittiviiva-segmentti (yhden linjan yksi suunta)
+// hover-tunnistusta ja korostusta varten.
+interface RouteLineEntry {
+  layer: L.Polyline;
+  shortName: string;
+  direction: DirectionInfo;
+}
+
+// Etsii kaikki reittiviivat, jotka kulkevat hiiren kohdalla (ei vain
+// päällimmäistä) laskemalla pikselietäisyyden jokaisen viivan jokaiseen
+// segmenttiin kartan nykyisessä zoomissa/panoroinnissa.
+function findLineHits(map: L.Map, latlng: L.LatLng, lines: RouteLineEntry[]): RouteLineEntry[] {
+  const point = map.latLngToContainerPoint(latlng);
+  const hits: RouteLineEntry[] = [];
+
+  for (const entry of lines) {
+    const containerPoints = entry.direction.shape.map(([lat, lon]) => map.latLngToContainerPoint([lat, lon]));
+    for (let i = 0; i < containerPoints.length - 1; i++) {
+      if (L.LineUtil.pointToSegmentDistance(point, containerPoints[i], containerPoints[i + 1]) <= HOVER_TOLERANCE_PX) {
+        hits.push(entry);
+        break;
+      }
+    }
+  }
+
+  return hits.sort((a, b) => {
+    const na = Number(a.shortName);
+    const nb = Number(b.shortName);
+    if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
+    return a.shortName.localeCompare(b.shortName);
+  });
+}
+
+// Korostaa hoveratut viivat (paksumpi, peittävämpi, tuodaan eteen) ja
+// palauttaa niiden joukon; edellisen kutsun osumat, jotka eivät enää osu,
+// palautetaan normaalityyliin. Vain muuttuneisiin viivoihin kosketaan.
+function applyHoverHighlight(previous: Set<L.Polyline>, hits: RouteLineEntry[]): Set<L.Polyline> {
+  const next = new Set(hits.map((h) => h.layer));
+
+  for (const layer of previous) {
+    if (!next.has(layer)) {
+      layer.setStyle({ weight: 4, opacity: ROUTE_LINE_OPACITY });
+    }
+  }
+  for (const layer of next) {
+    if (!previous.has(layer)) {
+      layer.setStyle({ weight: 6, opacity: ROUTE_LINE_HIGHLIGHT_OPACITY });
+      layer.bringToFront();
+    }
+  }
+
+  return next;
+}
+
 function routeTooltipHtml(shortName: string, direction: DirectionInfo): string {
   const headsign = direction.headsign || 'tuntematon';
   return `
     <div class="route-tooltip">
       <div class="route-tooltip__line">Linja ${escapeHtml(shortName)}</div>
       <div>Suunta: ${escapeHtml(headsign)}</div>
+    </div>
+  `;
+}
+
+// Kun useampi linja osuu hoverin alle samaan aikaan, listataan ne kaikki
+// yhdessä tooltipissä sen sijaan että näytettäisiin vain ylin/ensimmäinen.
+function combinedRouteTooltipHtml(hits: RouteLineEntry[]): string {
+  if (hits.length === 1) {
+    return routeTooltipHtml(hits[0].shortName, hits[0].direction);
+  }
+
+  const items = hits
+    .map(
+      (h) =>
+        `<div class="route-tooltip__item"><strong>Linja ${escapeHtml(h.shortName)}</strong> · ${escapeHtml(h.direction.headsign || 'tuntematon')}</div>`,
+    )
+    .join('');
+
+  return `
+    <div class="route-tooltip">
+      <div class="route-tooltip__line">${hits.length} linjaa tässä kohtaa</div>
+      ${items}
     </div>
   `;
 }
@@ -126,6 +209,11 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const hasAutoFittedRef = useRef(false);
+  // Kaikki tällä hetkellä piirretyt reittiviivat (metatietoineen) hover-tunnistusta
+  // varten, sekä mitkä niistä ovat parhaillaan korostettuina ja jaettu hover-tooltip.
+  const routeLinesRef = useRef<RouteLineEntry[]>([]);
+  const highlightedLayersRef = useRef<Set<L.Polyline>>(new Set());
+  const hoverTooltipRef = useRef<L.Tooltip | null>(null);
 
   const groupsKey = routeGroups.map((g) => g.key).join(',');
   const allVehicles = routeGroups.flatMap((g) => g.vehicles);
@@ -153,11 +241,47 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
     routeLayerRef.current = routeLayer;
     markersLayerRef.current = markersLayer;
 
+    // Jaettu tooltip reittiviivojen hoverille. Ei sidota mihinkään yksittäiseen
+    // viivaan (bindTooltip näyttäisi vain päällimmäisen), vaan sijoitetaan ja
+    // täytetään käsin sen mukaan mitä findLineHits löytää kursorin kohdalta.
+    const hoverTooltip = L.tooltip({ direction: 'top', offset: [0, -6] });
+    hoverTooltipRef.current = hoverTooltip;
+
+    let rafId: number | null = null;
+
+    function handleMouseMove(e: L.LeafletMouseEvent) {
+      if (rafId !== null) return; // pyynnöt niputetaan yhteen per ruudunpäivitys
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const hits = findLineHits(map, e.latlng, routeLinesRef.current);
+        highlightedLayersRef.current = applyHoverHighlight(highlightedLayersRef.current, hits);
+
+        if (hits.length === 0) {
+          if (map.hasLayer(hoverTooltip)) map.removeLayer(hoverTooltip);
+          return;
+        }
+        hoverTooltip.setLatLng(e.latlng).setContent(combinedRouteTooltipHtml(hits));
+        if (!map.hasLayer(hoverTooltip)) hoverTooltip.addTo(map);
+      });
+    }
+
+    function handleMouseOut() {
+      highlightedLayersRef.current = applyHoverHighlight(highlightedLayersRef.current, []);
+      if (map.hasLayer(hoverTooltip)) map.removeLayer(hoverTooltip);
+    }
+
+    map.on('mousemove', handleMouseMove);
+    map.on('mouseout', handleMouseOut);
+
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      map.off('mousemove', handleMouseMove);
+      map.off('mouseout', handleMouseOut);
       map.remove();
       mapRef.current = null;
       routeLayerRef.current = null;
       markersLayerRef.current = null;
+      hoverTooltipRef.current = null;
     };
   }, []);
 
@@ -178,7 +302,16 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
     if (!routeLayer) return;
 
     routeLayer.clearLayers();
+    // Vanhat viivaviitteet eivät enää päde uudelleenpiirron jälkeen - nollataan
+    // korostus ja piilotetaan mahdollisesti auki oleva hover-tooltip.
+    highlightedLayersRef.current = new Set();
+    const map = mapRef.current;
+    const hoverTooltip = hoverTooltipRef.current;
+    if (map && hoverTooltip && map.hasLayer(hoverTooltip)) {
+      map.removeLayer(hoverTooltip);
+    }
 
+    const lines: RouteLineEntry[] = [];
     for (const group of routeGroups) {
       for (const direction of group.directions) {
         if (direction.shape.length < 2) continue;
@@ -187,14 +320,13 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
           weight: 4,
           opacity: ROUTE_LINE_OPACITY,
           lineJoin: 'round',
-        });
-        line.bindTooltip(routeTooltipHtml(group.shortName, direction), {
-          sticky: true,
-          direction: 'top',
+          interactive: false, // hover hoidetaan itse kartan mousemove-kuuntelijalla
         });
         line.addTo(routeLayer);
+        lines.push({ layer: line, shortName: group.shortName, direction });
       }
     }
+    routeLinesRef.current = lines;
   }, [groupsKey, routeGroups]);
 
   // Piirretään ajoneuvomerkit aina, kun sijainnit päivittyvät.
