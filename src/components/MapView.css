@@ -34,6 +34,16 @@
   margin-bottom: 2px;
 }
 
+.route-tooltip {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.route-tooltip__line {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
 .leaflet-container {
   font-family: inherit;
 }

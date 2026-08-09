@@ -8,18 +8,16 @@ import './MapView.css';
 const HELSINKI_CENTER: L.LatLngTuple = [60.1719, 24.9414];
 const HELSINKI_ZOOM = 11;
 
-// Eri suunnat eri väreillä (bonusominaisuus). Käytössä vain kun näytetään
-// yhtä linjaa kerrallaan (RouteGroup.color puuttuu). Tuntematon suunta -> harmaa.
+// Eri suunnat eri väreillä. Sama pari kelpaa sekä ajoneuvomerkeille (yhden
+// linjan tilassa) että reittiviivoille (aina) - näin saman linjan kaksi
+// suuntaa erottuvat toisistaan silloinkin, kun ne kulkevat lähes samaa katua.
+// Tuntematon suunta -> harmaa.
 const DIRECTION_COLORS: Record<number, string> = {
   0: '#0072ce',
   1: '#e8590c',
 };
 const UNKNOWN_COLOR = '#6b7280';
-
-// Yhden linjan reittiviiva piirretään punaisena, puoliläpinäkyvänä (erottuu
-// ajoneuvojen suuntaväreistä, mutta ei peitä karttapohjaa alleen kokonaan).
-const ROUTE_LINE_COLOR = '#dc2626';
-const ROUTE_LINE_OPACITY = 0.5;
+const ROUTE_LINE_OPACITY = 0.6;
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
@@ -85,6 +83,16 @@ function tooltipHtml(vehicle: VehiclePosition, shortName: string, directions: Di
   `;
 }
 
+function routeTooltipHtml(shortName: string, direction: DirectionInfo): string {
+  const headsign = direction.headsign || 'tuntematon';
+  return `
+    <div class="route-tooltip">
+      <div class="route-tooltip__line">Linja ${escapeHtml(shortName)}</div>
+      <div>Suunta: ${escapeHtml(headsign)}</div>
+    </div>
+  `;
+}
+
 function escapeHtml(input: string): string {
   return input
     .replace(/&/g, '&amp;')
@@ -94,8 +102,10 @@ function escapeHtml(input: string): string {
 }
 
 // Yksi kartalla näytettävä linja: sen tiedot, ajoneuvot ja (monen linjan
-// tilassa) oma erotteleva väri. Yhden linjan tilassa `color` jätetään pois,
-// jolloin käytetään reitille punaista ja ajoneuvoille suuntakohtaisia värejä.
+// tilassa) oma erotteleva väri ajoneuvomerkeille. Reittiviivat väritetään
+// aina suunnan mukaan (ks. directionColor), joten `color` vaikuttaa vain
+// ajoneuvoihin - yhden linjan tilassa `color` jätetään pois, jolloin
+// ajoneuvotkin saavat suuntakohtaisen värin.
 export interface RouteGroup {
   key: string;
   shortName: string;
@@ -159,7 +169,10 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
   }, [groupsKey]);
 
   // Piirretään jokaisen näytettävän linjan reitti (molemmat suunnat) aina,
-  // kun linjavalikoima tai sen geometria muuttuu.
+  // kun linjavalikoima tai sen geometria muuttuu. Suunnat väritetään aina eri
+  // väreillä (ei linjan/moodin mukaan), jotta saman linjan kaksi suuntaa
+  // erottuvat toisistaan siellä missä ne kulkevat samaa katua pitkin;
+  // hover näyttää kummastakin linjan numeron ja suunnan tooltipissä.
   useEffect(() => {
     const routeLayer = routeLayerRef.current;
     if (!routeLayer) return;
@@ -169,12 +182,17 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
     for (const group of routeGroups) {
       for (const direction of group.directions) {
         if (direction.shape.length < 2) continue;
-        L.polyline(direction.shape, {
-          color: group.color ?? ROUTE_LINE_COLOR,
+        const line = L.polyline(direction.shape, {
+          color: directionColor(direction.directionId),
           weight: 4,
           opacity: ROUTE_LINE_OPACITY,
           lineJoin: 'round',
-        }).addTo(routeLayer);
+        });
+        line.bindTooltip(routeTooltipHtml(group.shortName, direction), {
+          sticky: true,
+          direction: 'top',
+        });
+        line.addTo(routeLayer);
       }
     }
   }, [groupsKey, routeGroups]);
