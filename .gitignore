@@ -1,0 +1,28 @@
+# Riippuvuudet
+node_modules
+
+# Build-tulosteet
+dist
+dist-ssr
+*.tsbuildinfo
+
+# Ympäristömuuttujat / salaisuudet (ks. .env.example jos sellainen lisätään)
+.env
+.env.local
+.env.*.local
+
+# Lokit
+*.log
+npm-debug.log*
+
+# Editorit / IDE:t
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Käyttöjärjestelmän roskatiedostot
+.DS_Store
+Thumbs.db
+
+# Viten välimuisti
+.vite

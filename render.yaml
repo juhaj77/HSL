@@ -1,0 +1,25 @@
+# Render "Blueprint" -tiedosto: yksi Web Service, joka buildaa React-frontendin
+# (Vite) ja ajaa sitten Node/Express-palvelimen (server/index.mjs), joka tarjoilee
+# sekä buildatun frontendin että /api-reitit samasta originista. Ei erillistä
+# Static Site -palvelua eikä CORS-säätöä tarvita tuotannossa.
+#
+# Käyttö: Render Dashboard -> New -> Blueprint -> valitse tämä repo.
+# Render löytää tämän tiedoston automaattisesti juuresta.
+services:
+  - type: web
+    name: hsl-bussikartta
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      # Pakollinen: linjahaku (Digitransit GraphQL) ei toimi ilman tätä.
+      # Hae osoitteesta https://portal-api.digitransit.fi/ (ks. README) ja
+      # aseta arvo Render-dashboardissa deployn jälkeen (sync: false = ei
+      # tallenneta tähän tiedostoon eikä versionhallintaan).
+      - key: VITE_DIGITRANSIT_KEY
+        sync: false
+      # Valinnainen: MapTiler-karttalaatat. Tyhjänä sovellus käyttää ilmaisia
+      # OpenStreetMap-laattoja.
+      - key: VITE_MAPTILER_KEY
+        sync: false

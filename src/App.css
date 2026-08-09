@@ -1,0 +1,103 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 1100; /* pysyy Leaflet-kontrollien yläpuolella */
+  flex-wrap: wrap;
+}
+
+.app__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app__title-emoji {
+  font-size: 1.4rem;
+}
+
+.app__title h1 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.app__keskiovi-button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: auto;
+}
+
+.app__keskiovi-button:hover {
+  background: var(--surface-hover);
+}
+
+.app__keskiovi-button--active {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+.app__keskiovi-button--active:hover {
+  background: #b91c1c;
+}
+
+.app__fit-button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.app__fit-button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.app__fit-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app__status {
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
+  min-height: 1.6rem;
+  display: flex;
+  align-items: center;
+}
+
+.app__status-hint {
+  color: var(--text-muted);
+}
+
+.app__status-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.app__map {
+  flex: 1;
+  position: relative;
+}
