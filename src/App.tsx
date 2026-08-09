@@ -17,14 +17,31 @@ const KESKIOVI_BUS_LINES = ['20', '30', '40', '200', '300', '400', '500', '510',
 const KESKIOVI_TRAM_LINES = ['15'];
 const KESKIOVI_LINES = [...KESKIOVI_BUS_LINES, ...KESKIOVI_TRAM_LINES];
 
-// Väritys kulkuvälineen mukaan (ei linjakohtaisesti - 14 linjaa ei erotu
-// enää toisistaan pelkällä värisävyllä). Sininen/vihreä-pari on validoitu
-// saavutettavaksi (CVD-turvallinen) sekä vaalealla että tummalla taustalla.
-const KESKIOVI_BUS_COLOR = '#2a78d6';
-const KESKIOVI_TRAM_COLOR = '#008300';
+// Jokainen linja saa oman värinsä, jotta 14 päällekkäinkin kulkevaa linjaa
+// erottuu kartalla toisistaan (ei enää pelkkää bussi/spora-jakoa). 14 sävyä on
+// enemmän kuin mitä värillä voi taata täysin luotettavasti erottuvan kaikille
+// (myös värisokeille) - siksi hover näyttää aina tarkan linjanumeron tekstinä,
+// eikä värillä tarvitse kantaa koko tunnistetta.
+const KESKIOVI_LINE_COLORS: Record<string, string> = {
+  '20': '#c32222',
+  '30': '#c36722',
+  '40': '#c3ac22',
+  '200': '#95c322',
+  '300': '#50c322',
+  '400': '#22c339',
+  '500': '#22c37e',
+  '510': '#22c3c3',
+  '520': '#227ec3',
+  '530': '#2239c3',
+  '560': '#5022c3',
+  '570': '#9522c3',
+  '600': '#c322ac',
+  '15': '#c32267',
+};
+const KESKIOVI_LINE_FALLBACK_COLOR = '#6b7280';
 
-function keskioviColor(mode: string): string {
-  return mode === 'TRAM' ? KESKIOVI_TRAM_COLOR : KESKIOVI_BUS_COLOR;
+function keskioviColor(shortName: string): string {
+  return KESKIOVI_LINE_COLORS[shortName] ?? KESKIOVI_LINE_FALLBACK_COLOR;
 }
 
 function readLineFromUrl(): string {
@@ -100,7 +117,7 @@ function App() {
           shortName: r.routeInfo.shortName,
           directions: r.routeInfo.directions,
           vehicles: keskioviVehiclesByRoute[r.routeInfo.gtfsId] ?? [],
-          color: keskioviColor(r.routeInfo.mode),
+          color: keskioviColor(r.routeInfo.shortName),
         }))
     : routeInfo
       ? [

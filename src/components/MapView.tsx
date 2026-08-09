@@ -185,10 +185,9 @@ function escapeHtml(input: string): string {
 }
 
 // Yksi kartalla näytettävä linja: sen tiedot, ajoneuvot ja (monen linjan
-// tilassa) oma erotteleva väri ajoneuvomerkeille. Reittiviivat väritetään
-// aina suunnan mukaan (ks. directionColor), joten `color` vaikuttaa vain
-// ajoneuvoihin - yhden linjan tilassa `color` jätetään pois, jolloin
-// ajoneuvotkin saavat suuntakohtaisen värin.
+// tilassa) oma erotteleva väri sekä reittiviivalle että ajoneuvomerkeille.
+// Yhden linjan tilassa `color` jätetään pois, jolloin sekä reittiviiva että
+// ajoneuvot saavat suuntakohtaisen värin (ks. directionColor).
 export interface RouteGroup {
   key: string;
   shortName: string;
@@ -293,10 +292,11 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
   }, [groupsKey]);
 
   // Piirretään jokaisen näytettävän linjan reitti (molemmat suunnat) aina,
-  // kun linjavalikoima tai sen geometria muuttuu. Suunnat väritetään aina eri
-  // väreillä (ei linjan/moodin mukaan), jotta saman linjan kaksi suuntaa
-  // erottuvat toisistaan siellä missä ne kulkevat samaa katua pitkin;
-  // hover näyttää kummastakin linjan numeron ja suunnan tooltipissä.
+  // kun linjavalikoima tai sen geometria muuttuu. Yhden linjan tilassa suunnat
+  // väritetään eri väreillä (group.color puuttuu); monen linjan tilassa
+  // jokainen linja saa oman värinsä (group.color), jotta päällekkäiset linjat
+  // erottuvat kartalla toisistaan. Hover näyttää aina tarkan linjan+suunnan
+  // tooltipissä riippumatta väristä.
   useEffect(() => {
     const routeLayer = routeLayerRef.current;
     if (!routeLayer) return;
@@ -316,7 +316,10 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
       for (const direction of group.directions) {
         if (direction.shape.length < 2) continue;
         const line = L.polyline(direction.shape, {
-          color: directionColor(direction.directionId),
+          // Monen linjan tilassa (group.color asetettu) jokainen linja saa
+          // oman värinsä, jotta päällekkäin kulkevat linjat erottuvat
+          // toisistaan; yhden linjan tilassa värjätään suunnan mukaan.
+          color: group.color ?? directionColor(direction.directionId),
           weight: 4,
           opacity: ROUTE_LINE_OPACITY,
           lineJoin: 'round',
