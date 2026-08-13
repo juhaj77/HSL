@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LineSelector } from './components/LineSelector';
 import { MapView, type RouteGroup } from './components/MapView';
 import { useRouteInfo } from './hooks/useRouteInfo';
@@ -61,6 +61,34 @@ function App() {
   const [fitRequestId, setFitRequestId] = useState(0);
   const { position: userPosition, enabled: locationEnabled, error: locationError, toggle: toggleLocation } =
     useGeolocation();
+
+  // Mobiilissa yläpaneeli (otsikko, napit, linjahaku, statusrivi) voi
+  // pieninä näytöillä ja pitkillä statusteksteillä (rivittyy) viedä ison osan
+  // ruudusta kartalta. Mitataan paneelin todellinen korkeus ja tarjotaan
+  // piilotusmahdollisuus vain kun se vie yli kolmasosan näytön korkeudesta.
+  const topRef = useRef<HTMLDivElement | null>(null);
+  const [topCollapsed, setTopCollapsed] = useState(false);
+  const [showTopToggle, setShowTopToggle] = useState(false);
+
+  useEffect(() => {
+    if (topCollapsed) return; // paneeli piilossa - ei mitata sen (nollattua) korkeutta
+    const el = topRef.current;
+    if (!el) return;
+
+    function updateShowToggle() {
+      if (!el) return;
+      setShowTopToggle(el.offsetHeight > window.innerHeight / 3);
+    }
+
+    updateShowToggle();
+    const resizeObserver = new ResizeObserver(updateShowToggle);
+    resizeObserver.observe(el);
+    window.addEventListener('resize', updateShowToggle);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateShowToggle);
+    };
+  }, [topCollapsed]);
 
   // Yhden linjan tila (oletus).
   const { routeInfo, loading: routeLoading, error: routeError, notFound } = useRouteInfo(keskioviMode ? '' : line);
@@ -138,72 +166,85 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app__header">
-        <div className="app__title">
-          <span className="app__title-emoji" aria-hidden="true">🚌</span>
-          <h1>HSL-bussikartta</h1>
+      <div ref={topRef} className={`app__top${topCollapsed ? ' app__top--collapsed' : ''}`}>
+        <header className="app__header">
+          <div className="app__title">
+            <span className="app__title-emoji" aria-hidden="true">🚌</span>
+            <h1>HSL-bussikartta</h1>
+          </div>
+          <LineSelector value={line} onSubmit={handleSubmit} />
+          <button
+            type="button"
+            className={`app__keskiovi-button${keskioviMode ? ' app__keskiovi-button--active' : ''}`}
+            onClick={handleToggleKeskioviMode}
+            title={`Näytä kaikki keskiovesta nousun sallivat linjat kartalla yhtä aikaa: ${KESKIOVI_LINES.join(', ')}`}
+          >
+            {keskioviMode ? '✓ Keskiovilinjat' : 'Keskiovilinjat'}
+          </button>
+          <button
+            type="button"
+            className={`app__location-button${locationEnabled ? ' app__location-button--active' : ''}`}
+            onClick={toggleLocation}
+            title="Näytä nykyinen sijaintisi kartalla (päivittyy, jos liikut)"
+          >
+            {locationEnabled ? '✓ Sijaintini' : '📍 Sijaintini'}
+          </button>
+          <button
+            type="button"
+            className="app__fit-button"
+            onClick={() => setFitRequestId((n) => n + 1)}
+            disabled={totalVehicles === 0}
+            title="Sovita kartta näkyviin ajoneuvoihin"
+          >
+            Sovita kartta
+          </button>
+        </header>
+
+        <div className="app__status">
+          {locationEnabled && locationError && <span className="app__status-error">{locationError}</span>}
+          {locationEnabled && !locationError && !userPosition && <span className="app__status-hint">Haetaan sijaintia…</span>}
+          {keskioviMode && (
+            <span>
+              <strong>Keskiovilinjat</strong> ({KESKIOVI_BUS_LINES.join(', ')} + spora {KESKIOVI_TRAM_LINES.join(', ')}) ·{' '}
+              {(keskioviRoutesLoading || keskioviVehiclesLoading) && totalVehicles === 0
+                ? 'haetaan…'
+                : `${totalVehicles} ajoneuvoa liikenteessä`}
+              {keskioviLastUpdated && ` · päivitetty ${keskioviLastUpdated.toLocaleTimeString('fi-FI')}`}
+            </span>
+          )}
+          {keskioviMode && keskioviRoutesError && <span className="app__status-error">{keskioviRoutesError}</span>}
+          {keskioviMode && keskioviVehiclesError && <span className="app__status-error">{keskioviVehiclesError}</span>}
+
+          {!keskioviMode && !line && (
+            <span className="app__status-hint">Kirjoita linjan numero yllä, esim. 550, 510, 560 tai 39.</span>
+          )}
+          {!keskioviMode && line && routeLoading && <span>Haetaan linjan {line} tietoja…</span>}
+          {!keskioviMode && line && notFound && !routeLoading && (
+            <span className="app__status-error">Linjaa "{line}" ei löytynyt HSL:n verkostosta.</span>
+          )}
+          {!keskioviMode && routeError && <span className="app__status-error">{routeError}</span>}
+          {!keskioviMode && vehiclesError && <span className="app__status-error">{vehiclesError}</span>}
+          {!keskioviMode && routeInfo && (
+            <span>
+              <strong>Linja {routeInfo.shortName}</strong>
+              {directionSummary ? ` · ${directionSummary}` : ''} ·{' '}
+              {vehiclesLoading && vehicles.length === 0 ? 'haetaan ajoneuvoja…' : `${vehicles.length} ajoneuvoa liikenteessä`}
+              {lastUpdated && ` · päivitetty ${lastUpdated.toLocaleTimeString('fi-FI')}`}
+            </span>
+          )}
         </div>
-        <LineSelector value={line} onSubmit={handleSubmit} />
-        <button
-          type="button"
-          className={`app__keskiovi-button${keskioviMode ? ' app__keskiovi-button--active' : ''}`}
-          onClick={handleToggleKeskioviMode}
-          title={`Näytä kaikki keskiovesta nousun sallivat linjat kartalla yhtä aikaa: ${KESKIOVI_LINES.join(', ')}`}
-        >
-          {keskioviMode ? '✓ Keskiovilinjat' : 'Keskiovilinjat'}
-        </button>
-        <button
-          type="button"
-          className={`app__location-button${locationEnabled ? ' app__location-button--active' : ''}`}
-          onClick={toggleLocation}
-          title="Näytä nykyinen sijaintisi kartalla (päivittyy, jos liikut)"
-        >
-          {locationEnabled ? '✓ Sijaintini' : '📍 Sijaintini'}
-        </button>
-        <button
-          type="button"
-          className="app__fit-button"
-          onClick={() => setFitRequestId((n) => n + 1)}
-          disabled={totalVehicles === 0}
-          title="Sovita kartta näkyviin ajoneuvoihin"
-        >
-          Sovita kartta
-        </button>
-      </header>
-
-      <div className="app__status">
-        {locationEnabled && locationError && <span className="app__status-error">{locationError}</span>}
-        {locationEnabled && !locationError && !userPosition && <span className="app__status-hint">Haetaan sijaintia…</span>}
-        {keskioviMode && (
-          <span>
-            <strong>Keskiovilinjat</strong> ({KESKIOVI_BUS_LINES.join(', ')} + spora {KESKIOVI_TRAM_LINES.join(', ')}) ·{' '}
-            {(keskioviRoutesLoading || keskioviVehiclesLoading) && totalVehicles === 0
-              ? 'haetaan…'
-              : `${totalVehicles} ajoneuvoa liikenteessä`}
-            {keskioviLastUpdated && ` · päivitetty ${keskioviLastUpdated.toLocaleTimeString('fi-FI')}`}
-          </span>
-        )}
-        {keskioviMode && keskioviRoutesError && <span className="app__status-error">{keskioviRoutesError}</span>}
-        {keskioviMode && keskioviVehiclesError && <span className="app__status-error">{keskioviVehiclesError}</span>}
-
-        {!keskioviMode && !line && (
-          <span className="app__status-hint">Kirjoita linjan numero yllä, esim. 550, 510, 560 tai 39.</span>
-        )}
-        {!keskioviMode && line && routeLoading && <span>Haetaan linjan {line} tietoja…</span>}
-        {!keskioviMode && line && notFound && !routeLoading && (
-          <span className="app__status-error">Linjaa "{line}" ei löytynyt HSL:n verkostosta.</span>
-        )}
-        {!keskioviMode && routeError && <span className="app__status-error">{routeError}</span>}
-        {!keskioviMode && vehiclesError && <span className="app__status-error">{vehiclesError}</span>}
-        {!keskioviMode && routeInfo && (
-          <span>
-            <strong>Linja {routeInfo.shortName}</strong>
-            {directionSummary ? ` · ${directionSummary}` : ''} ·{' '}
-            {vehiclesLoading && vehicles.length === 0 ? 'haetaan ajoneuvoja…' : `${vehicles.length} ajoneuvoa liikenteessä`}
-            {lastUpdated && ` · päivitetty ${lastUpdated.toLocaleTimeString('fi-FI')}`}
-          </span>
-        )}
       </div>
+
+      {showTopToggle && (
+        <button
+          type="button"
+          className="app__top-toggle"
+          onClick={() => setTopCollapsed((prev) => !prev)}
+          title={topCollapsed ? 'Näytä valikko' : 'Piilota valikko (vie yli kolmasosan tilasta)'}
+        >
+          {topCollapsed ? '▾ Näytä valikko' : '▴ Piilota valikko'}
+        </button>
+      )}
 
       <main className="app__map">
         <MapView routeGroups={routeGroups} fitRequestId={fitRequestId} userPosition={userPosition} />

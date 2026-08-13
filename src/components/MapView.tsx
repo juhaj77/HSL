@@ -303,8 +303,15 @@ export function MapView({ routeGroups, fitRequestId, userPosition }: MapViewProp
     map.on('mousemove', handleMouseMove);
     map.on('mouseout', handleMouseOut);
 
+    // Kartan säiliön koko voi muuttua ilman ikkunan resize-tapahtumaa (esim.
+    // mobiilin yläpaneeli piilotetaan/näytetään) - Leaflet ei huomaa tätä
+    // itse, joten kutsutaan invalidateSize aina kun säiliön koko muuttuu.
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
+    resizeObserver.observe(containerRef.current);
+
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
       map.off('mousemove', handleMouseMove);
       map.off('mouseout', handleMouseOut);
       map.remove();

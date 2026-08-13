@@ -126,3 +126,25 @@
   flex: 1;
   position: relative;
 }
+
+/* Yläpaneelin (otsikko + napit + statusrivi) piilotus mobiilissa, kun se vie
+   liikaa tilaa kartalta - ks. App.tsx:n ResizeObserver-mittaus. */
+.app__top--collapsed {
+  display: none;
+}
+
+.app__top-toggle {
+  width: 100%;
+  padding: 0.3rem;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  z-index: 1100; /* pysyy Leaflet-kontrollien yläpuolella */
+}
+
+.app__top-toggle:hover {
+  background: var(--surface-hover);
+}
