@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createFilterState, filterPosition, type FilterState, type RawFix } from '../services/positionFilter';
 
 export interface UserPosition {
   lat: number;
@@ -35,12 +36,19 @@ function geolocationErrorMessage(err: GeolocationPositionError): string {
  * uudestaan ja `position` päivittyy - kartalla oleva merkki seuraa siis
  * mukana ilman erillistä pollausta. Seuranta katkaistaan (clearWatch) aina
  * kun `enabled` menee pois päältä tai komponentti puretaan.
+ *
+ * Raa'at GPS-mittaukset kulkevat positionFilter.ts:n läpi ennen kuin ne
+ * päätyvät `position`-tilaan: puhelin harhailee ajoittain hetkeksi todelliselta
+ * sijainniltaan (multipath, kylmä kiinnitys), ja suodatin sekä lukitsee
+ * merkin paikoilleen mittausten kohinan sisällä että hylkää yksittäiset
+ * epäuskottavan nopeat hypyt kunnes seuraava mittaus vahvistaa ne.
  */
 export function useGeolocation(): UseGeolocationResult {
   const [enabled, setEnabled] = useState(false);
   const [position, setPosition] = useState<UserPosition | null>(null);
   const [error, setError] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const filterStateRef = useRef<FilterState | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -52,15 +60,25 @@ export function useGeolocation(): UseGeolocationResult {
     }
 
     setError(null);
+    filterStateRef.current = null; // uusi paikannusjakso -> aloitetaan suodatus puhtaalta pöydältä
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         setError(null);
-        setPosition({
+        const raw: RawFix = {
           lat: pos.coords.latitude,
           lon: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
           heading: pos.coords.heading !== null && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
-        });
+          timestamp: pos.timestamp,
+        };
+
+        filterStateRef.current = filterStateRef.current
+          ? filterPosition(filterStateRef.current, raw)
+          : createFilterState(raw);
+
+        const { accepted } = filterStateRef.current;
+        setPosition({ lat: accepted.lat, lon: accepted.lon, accuracy: accepted.accuracy, heading: accepted.heading });
       },
       (err) => {
         setError(geolocationErrorMessage(err));
