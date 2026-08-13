@@ -5,6 +5,7 @@ import { useRouteInfo } from './hooks/useRouteInfo';
 import { useRouteInfoList } from './hooks/useRouteInfoList';
 import { useVehiclePositions } from './hooks/useVehiclePositions';
 import { useMultiVehiclePositions } from './hooks/useMultiVehiclePositions';
+import { useGeolocation } from './hooks/useGeolocation';
 import './App.css';
 
 // "Keskiovilinjat" (bonus): näyttää kartalla yhtä aikaa kaikki linjat, joilla
@@ -58,6 +59,8 @@ function App() {
   const [line, setLine] = useState<string>(() => readLineFromUrl());
   const [keskioviMode, setKeskioviMode] = useState<boolean>(() => readKeskioviModeFromUrl());
   const [fitRequestId, setFitRequestId] = useState(0);
+  const { position: userPosition, enabled: locationEnabled, error: locationError, toggle: toggleLocation } =
+    useGeolocation();
 
   // Yhden linjan tila (oletus).
   const { routeInfo, loading: routeLoading, error: routeError, notFound } = useRouteInfo(keskioviMode ? '' : line);
@@ -151,6 +154,14 @@ function App() {
         </button>
         <button
           type="button"
+          className={`app__location-button${locationEnabled ? ' app__location-button--active' : ''}`}
+          onClick={toggleLocation}
+          title="Näytä nykyinen sijaintisi kartalla (päivittyy, jos liikut)"
+        >
+          {locationEnabled ? '✓ Sijaintini' : '📍 Sijaintini'}
+        </button>
+        <button
+          type="button"
           className="app__fit-button"
           onClick={() => setFitRequestId((n) => n + 1)}
           disabled={totalVehicles === 0}
@@ -161,6 +172,8 @@ function App() {
       </header>
 
       <div className="app__status">
+        {locationEnabled && locationError && <span className="app__status-error">{locationError}</span>}
+        {locationEnabled && !locationError && !userPosition && <span className="app__status-hint">Haetaan sijaintia…</span>}
         {keskioviMode && (
           <span>
             <strong>Keskiovilinjat</strong> ({KESKIOVI_BUS_LINES.join(', ')} + spora {KESKIOVI_TRAM_LINES.join(', ')}) ·{' '}
@@ -193,7 +206,7 @@ function App() {
       </div>
 
       <main className="app__map">
-        <MapView routeGroups={routeGroups} fitRequestId={fitRequestId} />
+        <MapView routeGroups={routeGroups} fitRequestId={fitRequestId} userPosition={userPosition} />
       </main>
     </div>
   );

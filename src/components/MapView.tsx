@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { DirectionInfo, VehiclePosition } from '../types';
+import type { UserPosition } from '../hooks/useGeolocation';
 import './MapView.css';
 
 // Helsingin seudun oletuskeskitys, kun sovellus avataan ensimmäistä kertaa.
@@ -67,6 +68,24 @@ function createVehicleIcon(directionId: number | null, bearing: number | null, c
     html: inner,
     iconSize: [26, 26],
     iconAnchor: [13, 13],
+  });
+}
+
+// Käyttäjän oman sijainnin merkki: pulssiva sininen piste, ja jos laite
+// tarjoaa kompassisuunnan, pieni nuoli osoittamassa sitä (kuten Google Mapsissa).
+function createUserLocationIcon(heading: number | null): L.DivIcon {
+  const arrow = heading !== null ? '<div class="user-location__heading"></div>' : '';
+  return L.divIcon({
+    className: 'user-location-icon',
+    html: `
+      <div class="user-location__pulse"></div>
+      <div class="user-location__marker" style="transform: rotate(${heading ?? 0}deg)">
+        ${arrow}
+        <div class="user-location__dot"></div>
+      </div>
+    `,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
   });
 }
 
@@ -200,13 +219,22 @@ interface MapViewProps {
   routeGroups: RouteGroup[];
   /** Kasvata tätä lukua pyytääksesi karttaa sovittamaan näkymän kaikkiin ajoneuvoihin. */
   fitRequestId: number;
+  /** Käyttäjän oma sijainti (jos paikannus on päällä); null = ei näytetä. */
+  userPosition: UserPosition | null;
 }
 
-export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
+export function MapView({ routeGroups, fitRequestId, userPosition }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const userLayerRef = useRef<L.LayerGroup | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const userAccuracyCircleRef = useRef<L.Circle | null>(null);
+  // Kartta keskitetään käyttäjän sijaintiin kerran per paikannusjakso (kun
+  // piste ensin ilmestyy) - myöhemmät päivitykset vain siirtävät merkkiä,
+  // eivät sotke käyttäjän omaa panorointia/zoomia.
+  const hasCenteredOnUserRef = useRef(false);
   const hasAutoFittedRef = useRef(false);
   // Kaikki tällä hetkellä piirretyt reittiviivat (metatietoineen) hover-tunnistusta
   // varten, sekä mitkä niistä ovat parhaillaan korostettuina ja jaettu hover-tooltip.
@@ -232,13 +260,16 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
     L.tileLayer(url, { attribution, maxZoom: 19, subdomains: 'abc' }).addTo(map);
 
     // Reittiviiva-kerros lisätään ennen ajoneuvokerrosta, jotta ajoneuvomerkit
-    // piirtyvät aina viivan päälle.
+    // piirtyvät aina viivan päälle. Käyttäjän oma sijainti tulee viimeisenä
+    // (ylimpänä), jotta se ei jää ajoneuvomerkkien alle.
     const routeLayer = L.layerGroup().addTo(map);
     const markersLayer = L.layerGroup().addTo(map);
+    const userLayer = L.layerGroup().addTo(map);
 
     mapRef.current = map;
     routeLayerRef.current = routeLayer;
     markersLayerRef.current = markersLayer;
+    userLayerRef.current = userLayer;
 
     // Jaettu tooltip reittiviivojen hoverille. Ei sidota mihinkään yksittäiseen
     // viivaan (bindTooltip näyttäisi vain päällimmäisen), vaan sijoitetaan ja
@@ -280,6 +311,7 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
       mapRef.current = null;
       routeLayerRef.current = null;
       markersLayerRef.current = null;
+      userLayerRef.current = null;
       hoverTooltipRef.current = null;
     };
   }, []);
@@ -369,6 +401,59 @@ export function MapView({ routeGroups, fitRequestId }: MapViewProps) {
       }
     }
   }, [groupsKey, routeGroups]);
+
+  // Piirretään/päivitetään käyttäjän oma sijaintimerkki aina, kun uusi
+  // paikannustulos saapuu (watchPosition kutsuu takaisin joka kerta laitteen
+  // liikkuessa). Merkkiä ja tarkkuusympyrää siirretään paikallaan sen sijaan
+  // että kerros tyhjennettäisiin - näin päivitys pysyy sulavana. Kun paikannus
+  // sammutetaan (userPosition -> null), kerros tyhjennetään kokonaan.
+  useEffect(() => {
+    const map = mapRef.current;
+    const userLayer = userLayerRef.current;
+    if (!map || !userLayer) return;
+
+    if (!userPosition) {
+      userLayer.clearLayers();
+      userMarkerRef.current = null;
+      userAccuracyCircleRef.current = null;
+      hasCenteredOnUserRef.current = false;
+      return;
+    }
+
+    const latlng: L.LatLngTuple = [userPosition.lat, userPosition.lon];
+
+    if (!userMarkerRef.current) {
+      const marker = L.marker(latlng, {
+        icon: createUserLocationIcon(userPosition.heading),
+        zIndexOffset: 1000,
+        interactive: false,
+      });
+      marker.addTo(userLayer);
+      userMarkerRef.current = marker;
+
+      const circle = L.circle(latlng, {
+        radius: userPosition.accuracy,
+        color: '#1a73e8',
+        weight: 1,
+        fillColor: '#1a73e8',
+        fillOpacity: 0.15,
+        interactive: false,
+      });
+      circle.addTo(userLayer);
+      userAccuracyCircleRef.current = circle;
+    } else {
+      userMarkerRef.current.setLatLng(latlng);
+      userMarkerRef.current.setIcon(createUserLocationIcon(userPosition.heading));
+      userAccuracyCircleRef.current?.setLatLng(latlng);
+      userAccuracyCircleRef.current?.setRadius(userPosition.accuracy);
+    }
+
+    // Keskitä kartta sijaintiin vain ensimmäisellä tuloksella per paikannusjakso.
+    if (!hasCenteredOnUserRef.current) {
+      hasCenteredOnUserRef.current = true;
+      map.setView(latlng, Math.max(map.getZoom(), 15));
+    }
+  }, [userPosition]);
 
   // Manuaalinen "Sovita kartta" -pyyntö (bonus): sovita näkymä nykyisiin ajoneuvoihin.
   useEffect(() => {

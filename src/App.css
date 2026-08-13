@@ -58,6 +58,31 @@
   background: #b91c1c;
 }
 
+.app__location-button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: auto;
+}
+
+.app__location-button:hover {
+  background: var(--surface-hover);
+}
+
+.app__location-button--active {
+  background: #1a73e8;
+  border-color: #1a73e8;
+  color: #fff;
+}
+
+.app__location-button--active:hover {
+  background: #1558b0;
+}
+
 .app__fit-button {
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--border);
